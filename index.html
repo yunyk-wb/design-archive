@@ -235,6 +235,34 @@ body {
 .pnl { display: none; }
 .pnl.on { display: block; }
 
+/* Media grid */
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr)); gap: 8px; }
+.mg-item { border-radius: var(--radius-md); overflow: hidden; cursor: pointer; border: 1px solid var(--border); background: var(--surface); transition: transform .12s, border-color .12s; position: relative; }
+.mg-item:hover { transform: translateY(-2px); border-color: var(--border-md); }
+.mg-thumb { width: 100%; height: 100px; object-fit: cover; display: block; background: var(--bg); }
+.mg-thumb-placeholder { width: 100%; height: 100px; display: flex; align-items: center; justify-content: center; font-size: 26px; color: var(--text-3); background: var(--bg); }
+.mg-info { padding: 6px 8px; }
+.mg-name { font-size: 10px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mg-meta { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+.mg-vid-badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.55); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 20px; }
+
+/* Lightbox */
+.lb-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 200; align-items: center; justify-content: center; flex-direction: column; }
+.lb-overlay.open { display: flex; }
+.lb-close { position: absolute; top: 20px; right: 24px; background: none; border: none; color: #fff; font-size: 28px; cursor: pointer; opacity: .7; }
+.lb-close:hover { opacity: 1; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.12); border: none; color: #fff; font-size: 22px; cursor: pointer; padding: 12px 10px; border-radius: var(--radius-sm); }
+.lb-nav:hover { background: rgba(255,255,255,.22); }
+.lb-prev { left: 20px; }
+.lb-next { right: 20px; }
+.lb-media { max-width: 90vw; max-height: 78vh; object-fit: contain; border-radius: var(--radius-md); }
+.lb-video { max-width: 90vw; max-height: 78vh; border-radius: var(--radius-md); }
+.lb-info { margin-top: 14px; text-align: center; }
+.lb-name { font-size: 13px; color: rgba(255,255,255,.9); }
+.lb-meta { font-size: 11px; color: rgba(255,255,255,.5); margin-top: 3px; }
+.lb-open-btn { margin-top: 10px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.2); border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; text-decoration: none; }
+.lb-open-btn:hover { background: rgba(255,255,255,.22); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -369,6 +397,11 @@ body {
           </div>
           <div class="fg"></div>
         </div>
+        <div class="fg" style="margin-top:4px">
+          <label class="flbl">Google Drive 링크 <span style="color:var(--text-3)">(선택 — 미리보기용)</span></label>
+          <input class="finp" id="u-drive-url" placeholder="https://drive.google.com/file/d/... 또는 공유 링크">
+          <span style="font-size:10px;color:var(--text-3);margin-top:2px">파일이 여러 개면 첫 번째 파일 링크만 입력, 나머지는 파일명으로 관리됩니다</span>
+        </div>
         <div id="ulist" class="ulist"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
           <span id="u-msg" style="font-size:12px;color:var(--text-3)"></span>
@@ -396,6 +429,19 @@ body {
   </div>
 </div>
 
+<!-- 라이트박스 -->
+<div class="lb-overlay" id="lbOverlay" onclick="if(event.target===this)closeLb()">
+  <button class="lb-close" onclick="closeLb()"><i class="ti ti-x"></i></button>
+  <button class="lb-nav lb-prev" onclick="lbNav(-1)"><i class="ti ti-chevron-left"></i></button>
+  <button class="lb-nav lb-next" onclick="lbNav(1)"><i class="ti ti-chevron-right"></i></button>
+  <div id="lbContent"></div>
+  <div class="lb-info">
+    <div class="lb-name" id="lbName"></div>
+    <div class="lb-meta" id="lbMeta"></div>
+    <a class="lb-open-btn" id="lbDriveBtn" target="_blank"><i class="ti ti-brand-google-drive" style="font-size:14px"></i> Drive에서 열기</a>
+  </div>
+</div>
+
 <script>
 const CAT_ICON = {'Ent.&Media':'ti-device-tv','Beauty&Luxury':'ti-diamond','F&B':'ti-soup','Finance':'ti-chart-line'};
 const CAT_CLS  = {'Ent.&Media':'ent','Beauty&Luxury':'beauty','F&B':'fnb','Finance':'finance'};
@@ -409,13 +455,38 @@ async function api(params) {
   return res.json();
 }
 
+function showLoading(show) {
+  document.getElementById('loadingBar').style.display = show ? 'block' : 'none';
+}
+
 let brands = [];
 let assets = [];
-
-let uType='비딩', uMedia='이미지', uStatus='수주', nbType='비딩', nbStatus='검토중';
+let uType='비딩', uMedia='이미지', uStatus='수주';
 let pendingFiles=[], currentDetailId=null;
+let lbItems=[], lbIdx=0;
+
+// Drive URL → 직접 표시 가능한 URL로 변환
+function driveThumbUrl(url) {
+  if (!url) return '';
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w400`;
+  return '';
+}
+function driveEmbedUrl(url) {
+  if (!url) return '';
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+  return '';
+}
+function driveFileUrl(url) {
+  if (!url) return url;
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://drive.google.com/file/d/${m[1]}/view`;
+  return url;
+}
 
 function renderStats() {
+  if (!brands.length) { document.getElementById('statsRow').innerHTML='<div class="stat-card"><div class="stat-lbl">전체 소재</div><div class="stat-num">0</div></div><div class="stat-card"><div class="stat-lbl">등록 브랜드</div><div class="stat-num">0</div></div><div class="stat-card"><div class="stat-lbl">수주 브랜드</div><div class="stat-num">0</div></div><div class="stat-card"><div class="stat-lbl">영상 소재</div><div class="stat-num">0</div></div>'; return; }
   const total=assets.length, imgs=assets.filter(a=>a.media==='이미지').length;
   const won=brands.filter(b=>b.status==='수주').length;
   const bids=brands.filter(b=>b.type==='비딩').length;
@@ -440,14 +511,14 @@ function renderBrands() {
   const status=document.getElementById('f-status').value;
   const list=brands.filter(b=>(!q||b.name.toLowerCase().includes(q))&&(!cat||b.cat===cat)&&(!type||b.type===type)&&(!status||b.status===status));
   const g=document.getElementById('brandGrid');
-  if(!list.length){g.innerHTML='<div class="empty"><i class="ti ti-folder-off"></i>조건에 맞는 브랜드가 없습니다</div>';return;}
+  if(!list.length){g.innerHTML='<div class="empty"><i class="ti ti-folder-off" style="font-size:26px;display:block;margin-bottom:7px"></i>조건에 맞는 브랜드가 없습니다</div>';return;}
   g.innerHTML=list.map(b=>{
     const ba=assets.filter(a=>a.brand===b.name);
-    return`<div class="bcard" onclick="openDetail(${b.id})">
+    return`<div class="bcard" onclick="openDetail('${b.id}')">
       <div class="bcard-top">
         <div class="bico ${CAT_CLS[b.cat]||''}"><i class="ti ${CAT_ICON[b.cat]||'ti-folder'}"></i></div>
         <span class="sbadge ${b.status==='수주'?'s-won':b.status==='드롭'?'s-drop':'s-rv'}"
-          onclick="event.stopPropagation();cycleStatus(${b.id})">${b.status}</span>
+          onclick="event.stopPropagation();cycleStatus('${b.id}')">${b.status}</span>
       </div>
       <div class="bname">${b.name}</div>
       <div class="bcat">${b.cat}</div>
@@ -468,10 +539,10 @@ function renderGallery() {
   const list=assets.filter(a=>(!q||a.name.toLowerCase().includes(q))&&(!cat||a.cat===cat)&&(!type||a.type===type)&&(!media||a.media===media)&&(!brand||a.brand===brand));
   document.getElementById('galCount').textContent=`총 ${list.length}개 소재`;
   const g=document.getElementById('galGrid');
-  if(!list.length){g.innerHTML='<div class="empty" style="grid-column:1/-1"><i class="ti ti-photo-off"></i>소재가 없습니다</div>';return;}
+  if(!list.length){g.innerHTML='<div class="empty" style="grid-column:1/-1"><i class="ti ti-photo-off" style="font-size:26px;display:block;margin-bottom:7px"></i>소재가 없습니다</div>';return;}
   g.innerHTML=list.map(a=>`
-    <div class="gitem">
-      <div class="gthumb"><i class="ti ${a.media==='이미지'?'ti-photo':'ti-video'}"></i></div>
+    <div class="gitem" onclick="openLb(${JSON.stringify(list)}, ${list.indexOf(a)})">
+      <div class="gthumb">${a.url && a.media==='이미지' ? `<img src="${driveThumbUrl(a.url)}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:26px;color:var(--text-3)"><i class='ti ti-photo'></i></div>` : `<i class="ti ${a.media==='이미지'?'ti-photo':'ti-video'}"></i>`}</div>
       <div class="ginfo">
         <div class="gname" title="${a.name}">${a.name}</div>
         <div class="gmeta">
@@ -483,28 +554,39 @@ function renderGallery() {
   `).join('');
 }
 
-function syncBrandToExisting() {
-  const val = document.getElementById('u-brand-input').value.trim().toLowerCase();
-  const hint = document.getElementById('u-brand-hint');
-  if (!val) { hint.textContent = ''; return; }
-  const match = brands.find(b => b.name.toLowerCase() === val);
-  if (match) {
-    hint.textContent = `기존 브랜드 "${match.name}" 에 추가됩니다`;
-    hint.style.color = 'var(--bid-tx)';
-  } else {
-    hint.textContent = '새 브랜드로 등록됩니다';
-    hint.style.color = 'var(--text-3)';
-  }
+function renderMediaGrid(list) {
+  if(!list.length) return '<div class="empty">파일이 없습니다</div>';
+  return `<div class="media-grid">${list.map((a,i)=>`
+    <div class="mg-item" onclick="openLb(${JSON.stringify(list).replace(/"/g,'&quot;')}, ${i})">
+      ${a.url && a.media==='이미지'
+        ? `<img class="mg-thumb" src="${driveThumbUrl(a.url)}" onerror="this.outerHTML='<div class=\'mg-thumb-placeholder\'><i class=\'ti ti-photo\'></i></div>'">`
+        : `<div class="mg-thumb-placeholder"><i class="ti ${a.media==='영상'?'ti-video':'ti-photo'}"></i></div>`}
+      ${a.media==='영상'?'<div class="mg-vid-badge"><i class="ti ti-player-play" style="font-size:9px"></i> 영상</div>':''}
+      <div class="mg-info">
+        <div class="mg-name">${a.name}</div>
+        <div class="mg-meta">${a.date}</div>
+      </div>
+    </div>
+  `).join('')}</div>`;
 }
+
 function updateGalleryBrandSel() {
   const sel=document.getElementById('g-brand');
   const cur=sel.value;
   sel.innerHTML='<option value="">전체 브랜드</option>'+brands.map(b=>`<option${b.name===cur?' selected':''}>${b.name}</option>`).join('');
 }
-function updateUploadBrandSel() {}
+
+function syncBrandToExisting() {
+  const val = document.getElementById('u-brand-input').value.trim().toLowerCase();
+  const hint = document.getElementById('u-brand-hint');
+  if (!val) { hint.textContent = ''; return; }
+  const match = brands.find(b => b.name.toLowerCase() === val);
+  if (match) { hint.textContent = `기존 브랜드 "${match.name}" 에 추가됩니다`; hint.style.color = 'var(--bid-tx)'; }
+  else { hint.textContent = '새 브랜드로 등록됩니다'; hint.style.color = 'var(--text-3)'; }
+}
 
 async function cycleStatus(id) {
-  const b=brands.find(x=>x.id===id); if(!b)return;
+  const b=brands.find(x=>x.id==id); if(!b)return;
   const order=['검토중','수주','드롭'];
   b.status=order[(order.indexOf(b.status)+1)%3];
   renderBrands(); renderStats();
@@ -515,16 +597,16 @@ async function cycleStatus(id) {
 
 function openDetail(id) {
   currentDetailId=id;
-  const b=brands.find(x=>x.id===id); if(!b)return;
+  const b=brands.find(x=>x.id==id); if(!b)return;
   const ba=assets.filter(a=>a.brand===b.name);
-  const lastDate=ba.length?ba.sort((a,z)=>z.date.localeCompare(a.date))[0].date:'없음';
+  const lastDate=ba.length?[...ba].sort((a,z)=>z.date.localeCompare(a.date))[0].date:'없음';
   document.getElementById('dm-title').textContent=b.name;
   document.getElementById('dm-sub').textContent=`${b.cat} · 최근 등록 ${lastDate}`;
   const imgs=ba.filter(a=>a.media==='이미지'), vids=ba.filter(a=>a.media==='영상');
   document.getElementById('dm-body').innerHTML=`
     <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
       <span class="sbadge ${b.status==='수주'?'s-won':b.status==='드롭'?'s-drop':'s-rv'}" id="dm-status-badge"
-        style="cursor:pointer" onclick="cycleStatus(${b.id})">${b.status} (클릭 변경)</span>
+        style="cursor:pointer" onclick="cycleStatus('${b.id}')">${b.status} (클릭 변경)</span>
       <span class="tpill ${b.type==='비딩'?'tp-bid':'tp-task'}" style="font-size:11px;padding:3px 8px;border-radius:20px">${b.type}</span>
       <span style="font-size:11px;color:var(--text-3)">${b.cat}</span>
     </div>
@@ -533,41 +615,67 @@ function openDetail(id) {
       <div class="ds-card"><i class="ti ti-video" style="font-size:16px;color:var(--text-3)"></i><div class="ds-num">${vids.length}</div><div class="ds-lbl">영상</div></div>
     </div>
     <div class="fltab">
-      <button class="ftb on" onclick="switchFT('all',this,${id})">전체 (${ba.length})</button>
-      <button class="ftb" onclick="switchFT('img',this,${id})">이미지 (${imgs.length})</button>
-      <button class="ftb" onclick="switchFT('vid',this,${id})">영상 (${vids.length})</button>
+      <button class="ftb on" onclick="switchFT('all',this,'${id}')">전체 (${ba.length})</button>
+      <button class="ftb" onclick="switchFT('img',this,'${id}')">이미지 (${imgs.length})</button>
+      <button class="ftb" onclick="switchFT('vid',this,'${id}')">영상 (${vids.length})</button>
     </div>
-    <div class="flist" id="flist-${id}">${renderFileList(ba)}</div>
+    <div id="flist-${id}">${renderMediaGrid(ba)}</div>
   `;
   document.getElementById('detailModal').classList.add('open');
-}
-
-function renderFileList(list) {
-  if(!list.length) return '<div class="empty">파일이 없습니다</div>';
-  return list.map(a=>`<div class="fitem">
-    <i class="ti ${a.media==='이미지'?'ti-photo':'ti-video'}"></i>
-    <span class="fi-nm">${a.name}</span>
-    <span class="fi-dt">${a.date}</span>
-    <span class="tpill ${a.type==='비딩'?'tp-bid':'tp-task'}" style="font-size:10px;padding:2px 6px;border-radius:20px">${a.type}</span>
-  </div>`).join('');
 }
 
 function switchFT(tab, el, id) {
   document.querySelectorAll('.ftb').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');
-  const bname=brands.find(x=>x.id===id)?.name;
+  const bname=brands.find(x=>x.id==id)?.name;
   const ba=assets.filter(a=>a.brand===bname);
   const list=tab==='img'?ba.filter(a=>a.media==='이미지'):tab==='vid'?ba.filter(a=>a.media==='영상'):ba;
-  document.getElementById('flist-'+id).innerHTML=renderFileList(list);
+  document.getElementById('flist-'+id).innerHTML=renderMediaGrid(list);
 }
 
+// 라이트박스
+function openLb(list, idx) {
+  if (typeof list === 'string') { try { list = JSON.parse(list); } catch(e) { return; } }
+  lbItems = list; lbIdx = idx;
+  renderLb();
+  document.getElementById('lbOverlay').classList.add('open');
+}
+function closeLb() { document.getElementById('lbOverlay').classList.remove('open'); const v=document.querySelector('#lbContent video'); if(v)v.pause(); }
+function lbNav(dir) { lbIdx=(lbIdx+dir+lbItems.length)%lbItems.length; renderLb(); }
+function renderLb() {
+  const a=lbItems[lbIdx];
+  const embedUrl=driveEmbedUrl(a.url||'');
+  const fileUrl=driveFileUrl(a.url||'');
+  let mediaHtml='';
+  if(a.url && a.media==='이미지') {
+    mediaHtml=`<img class="lb-media" src="${driveThumbUrl(a.url)}" onerror="this.src=''" alt="${a.name}">`;
+  } else if(a.url && a.media==='영상') {
+    mediaHtml=`<iframe class="lb-video" src="${embedUrl}" frameborder="0" allowfullscreen style="width:min(800px,90vw);height:min(450px,60vh)"></iframe>`;
+  } else {
+    mediaHtml=`<div style="width:280px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(255,255,255,.06);border-radius:var(--radius-lg)"><i class="ti ${a.media==='이미지'?'ti-photo':'ti-video'}" style="font-size:48px;color:rgba(255,255,255,.4)"></i><span style="font-size:12px;color:rgba(255,255,255,.4)">미리보기 없음</span></div>`;
+  }
+  document.getElementById('lbContent').innerHTML=mediaHtml;
+  document.getElementById('lbName').textContent=a.name;
+  document.getElementById('lbMeta').textContent=`${a.brand} · ${a.type} · ${a.date}`;
+  const btn=document.getElementById('lbDriveBtn');
+  if(a.url){btn.href=fileUrl;btn.style.display='inline-flex';}else{btn.style.display='none';}
+  document.querySelector('.lb-prev').style.display=lbItems.length>1?'block':'none';
+  document.querySelector('.lb-next').style.display=lbItems.length>1?'block':'none';
+}
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('lbOverlay').classList.contains('open'))return;
+  if(e.key==='ArrowLeft')lbNav(-1);
+  else if(e.key==='ArrowRight')lbNav(1);
+  else if(e.key==='Escape')closeLb();
+});
+
 async function deleteBrand() {
-  const b=brands.find(x=>x.id===currentDetailId); if(!b)return;
+  const b=brands.find(x=>x.id==currentDetailId); if(!b)return;
   if(!confirm(`'${b.name}' 브랜드와 소재 ${assets.filter(a=>a.brand===b.name).length}개를 삭제할까요?`))return;
   showLoading(true);
   await api({action:'deleteBrand', id:b.id, name:b.name});
   assets=assets.filter(a=>a.brand!==b.name);
-  brands=brands.filter(x=>x.id!==currentDetailId);
+  brands=brands.filter(x=>x.id!=currentDetailId);
   closeM('detailModal');
   renderBrands(); renderStats(); renderGallery(); updateGalleryBrandSel();
   showLoading(false);
@@ -611,6 +719,7 @@ function setUStatus(s){uStatus=s;document.getElementById('u-won').className='seg
 async function doUpload() {
   const brandName = document.getElementById('u-brand-input').value.trim();
   const cat = document.getElementById('u-cat').value;
+  const driveUrl = document.getElementById('u-drive-url').value.trim();
   const msg = document.getElementById('u-msg');
   if (!brandName) { msg.textContent = '브랜드명을 입력해주세요.'; return; }
   if (!cat) { msg.textContent = '카테고리를 선택해주세요.'; return; }
@@ -623,36 +732,18 @@ async function doUpload() {
     existing = { id: res.id, name: brandName, cat, type: uType, status: uStatus };
     brands.push(existing);
   }
-  for (const f of pendingFiles) {
+  for (let i=0; i<pendingFiles.length; i++) {
+    const f = pendingFiles[i];
     const isVid = !!f.name.match(/\.(mp4|mov|avi)$/i);
     const media = isVid ? '영상' : uMedia;
     const d = today();
-    const res = await api({action:'addAsset', name:f.name, brand:existing.name, cat, type:uType, media, date:d});
-    assets.push({ id: res.id, name: f.name, brand: existing.name, cat, type: uType, media, date: d });
+    const url = i===0 ? driveUrl : '';
+    const res = await api({action:'addAsset', name:f.name, brand:existing.name, cat, type:uType, media, date:d, url});
+    assets.push({ id: res.id, name: f.name, brand: existing.name, cat, type: uType, media, date: d, url });
   }
   const cnt = pendingFiles.length; pendingFiles = [];
-  renderPending(); function showLoading(show) {
-  document.getElementById('loadingBar').style.display = show ? 'block' : 'none';
-}
-
-async function loadData() {
-  showLoading(true);
-  document.getElementById('brandGrid').innerHTML = '<div class="empty"><i class="ti ti-loader" style="font-size:26px;display:block;margin-bottom:7px"></i>데이터 불러오는 중...</div>';
-  try {
-    const [b, a] = await Promise.all([
-      api({action:'getBrands'}),
-      api({action:'getAssets'})
-    ]);
-    brands = Array.isArray(b) ? b : [];
-    assets = Array.isArray(a) ? a : [];
-  } catch(e) {
-    brands = []; assets = [];
-  }
-  renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
-  showLoading(false);
-}
-
-loadData();
+  document.getElementById('u-drive-url').value = '';
+  renderPending(); renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
   msg.textContent = `${existing.name}에 ${cnt}개 소재가 등록되었습니다.`;
   document.getElementById('u-brand-hint').textContent = '';
   showLoading(false);
@@ -674,12 +765,23 @@ function quickFilter(val) {
   goTab('brands', 0);
   if(val==='비딩'||val==='과제'){document.getElementById('f-type').value=val;document.getElementById('f-status').value='';}
   else if(val==='수주'){document.getElementById('f-status').value=val;document.getElementById('f-type').value='';}
-  document.getElementById('f-cat').value='';
-  document.getElementById('bq').value='';
+  document.getElementById('f-cat').value=''; document.getElementById('bq').value='';
   renderBrands();
 }
 
-renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
+async function loadData() {
+  showLoading(true);
+  document.getElementById('brandGrid').innerHTML = '<div class="empty"><i class="ti ti-loader" style="font-size:26px;display:block;margin-bottom:7px"></i>데이터 불러오는 중...</div>';
+  try {
+    const [b, a] = await Promise.all([api({action:'getBrands'}), api({action:'getAssets'})]);
+    brands = Array.isArray(b) ? b : [];
+    assets = Array.isArray(a) ? a : [];
+  } catch(e) { brands=[]; assets=[]; }
+  renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
+  showLoading(false);
+}
+
+loadData();
 </script>
 </body>
 </html>
