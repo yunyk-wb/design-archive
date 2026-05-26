@@ -242,6 +242,7 @@ body {
 </style>
 </head>
 <body>
+<div id="loadingBar" style="display:none;position:fixed;top:0;left:0;right:0;height:3px;background:var(--text);z-index:9999;animation:loadpulse 1s infinite alternate"><style>@keyframes loadpulse{from{opacity:.4}to{opacity:1}}</style></div>
 <div class="layout">
   <!-- Sidebar -->
   <aside class="sidebar">
@@ -400,28 +401,16 @@ const CAT_ICON = {'Ent.&Media':'ti-device-tv','Beauty&Luxury':'ti-diamond','F&B'
 const CAT_CLS  = {'Ent.&Media':'ent','Beauty&Luxury':'beauty','F&B':'fnb','Finance':'finance'};
 const today = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 
-let brands = [
-  {id:1,name:'CJ ENM',cat:'Ent.&Media',type:'비딩',status:'수주'},
-  {id:2,name:'아모레퍼시픽',cat:'Beauty&Luxury',type:'비딩',status:'드롭'},
-  {id:3,name:'빙그레',cat:'F&B',type:'과제',status:'검토중'},
-  {id:4,name:'삼성카드',cat:'Finance',type:'비딩',status:'수주'},
-  {id:5,name:'JTBC',cat:'Ent.&Media',type:'과제',status:'검토중'},
-  {id:6,name:'설화수',cat:'Beauty&Luxury',type:'비딩',status:'수주'},
-];
-let assets = [
-  {id:1,name:'main_visual_01.jpg',brand:'CJ ENM',cat:'Ent.&Media',type:'비딩',media:'이미지',date:'2025-05-20'},
-  {id:2,name:'brand_film.mp4',brand:'CJ ENM',cat:'Ent.&Media',type:'비딩',media:'영상',date:'2025-05-20'},
-  {id:3,name:'teaser_cut.mp4',brand:'CJ ENM',cat:'Ent.&Media',type:'비딩',media:'영상',date:'2025-05-21'},
-  {id:4,name:'key_visual_A.png',brand:'아모레퍼시픽',cat:'Beauty&Luxury',type:'비딩',media:'이미지',date:'2025-05-18'},
-  {id:5,name:'product_shot.jpg',brand:'아모레퍼시픽',cat:'Beauty&Luxury',type:'비딩',media:'이미지',date:'2025-05-18'},
-  {id:6,name:'motion_01.mp4',brand:'삼성카드',cat:'Finance',type:'비딩',media:'영상',date:'2025-05-22'},
-  {id:7,name:'event_banner.png',brand:'빙그레',cat:'F&B',type:'과제',media:'이미지',date:'2025-05-19'},
-  {id:8,name:'sns_feed.jpg',brand:'빙그레',cat:'F&B',type:'과제',media:'이미지',date:'2025-05-19'},
-  {id:9,name:'print_ad.jpg',brand:'설화수',cat:'Beauty&Luxury',type:'비딩',media:'이미지',date:'2025-05-23'},
-  {id:10,name:'brand_story.mp4',brand:'설화수',cat:'Beauty&Luxury',type:'비딩',media:'영상',date:'2025-05-23'},
-  {id:11,name:'kv_final.png',brand:'JTBC',cat:'Ent.&Media',type:'과제',media:'이미지',date:'2025-05-24'},
-  {id:12,name:'motion_reels.mp4',brand:'JTBC',cat:'Ent.&Media',type:'과제',media:'영상',date:'2025-05-24'},
-];
+const API_URL = 'https://script.google.com/a/macros/wisebirds.com/s/AKfycbyVdD2ebCqiMCS_pcMkQYP-g422LJl8OqBwFOxfDI8q8nmWglqp-5HIv3z8NMr_KODf/exec';
+
+async function api(params) {
+  const url = API_URL + '?' + new URLSearchParams(params).toString();
+  const res = await fetch(url);
+  return res.json();
+}
+
+let brands = [];
+let assets = [];
 
 let uType='비딩', uMedia='이미지', uStatus='수주', nbType='비딩', nbStatus='검토중';
 let pendingFiles=[], currentDetailId=null;
@@ -514,13 +503,14 @@ function updateGalleryBrandSel() {
 }
 function updateUploadBrandSel() {}
 
-function cycleStatus(id) {
+async function cycleStatus(id) {
   const b=brands.find(x=>x.id===id); if(!b)return;
   const order=['검토중','수주','드롭'];
   b.status=order[(order.indexOf(b.status)+1)%3];
   renderBrands(); renderStats();
   const el=document.getElementById('dm-status-badge');
   if(el){el.className=`sbadge ${b.status==='수주'?'s-won':b.status==='드롭'?'s-drop':'s-rv'}`;el.textContent=b.status+' (클릭 변경)';}
+  await api({action:'updateBrandStatus', id:b.id, status:b.status});
 }
 
 function openDetail(id) {
@@ -571,13 +561,16 @@ function switchFT(tab, el, id) {
   document.getElementById('flist-'+id).innerHTML=renderFileList(list);
 }
 
-function deleteBrand() {
+async function deleteBrand() {
   const b=brands.find(x=>x.id===currentDetailId); if(!b)return;
   if(!confirm(`'${b.name}' 브랜드와 소재 ${assets.filter(a=>a.brand===b.name).length}개를 삭제할까요?`))return;
+  showLoading(true);
+  await api({action:'deleteBrand', id:b.id, name:b.name});
   assets=assets.filter(a=>a.brand!==b.name);
   brands=brands.filter(x=>x.id!==currentDetailId);
   closeM('detailModal');
-  renderBrands(); renderStats(); renderGallery(); updateGalleryBrandSel(); updateUploadBrandSel();
+  renderBrands(); renderStats(); renderGallery(); updateGalleryBrandSel();
+  showLoading(false);
 }
 
 function handleDrop(e) { e.preventDefault(); document.getElementById('upZone').classList.remove('drag'); handleFiles(e.dataTransfer.files); }
@@ -615,26 +608,54 @@ function setUType(t){
 function setUMedia(m){uMedia=m;document.getElementById('u-img').className='seg-b'+(m==='이미지'?' on':'');document.getElementById('u-vid').className='seg-b'+(m==='영상'?' on':'');}
 function setUStatus(s){uStatus=s;document.getElementById('u-won').className='seg-b'+(s==='수주'?' on':'');document.getElementById('u-drop').className='seg-b'+(s==='드롭'?' on':'');}
 
-function doUpload() {
+async function doUpload() {
   const brandName = document.getElementById('u-brand-input').value.trim();
   const cat = document.getElementById('u-cat').value;
   const msg = document.getElementById('u-msg');
   if (!brandName) { msg.textContent = '브랜드명을 입력해주세요.'; return; }
   if (!cat) { msg.textContent = '카테고리를 선택해주세요.'; return; }
   if (!pendingFiles.length) { msg.textContent = '업로드할 파일을 선택해주세요.'; return; }
+  showLoading(true);
+  msg.textContent = '저장 중...';
   let existing = brands.find(b => b.name.toLowerCase() === brandName.toLowerCase());
   if (!existing) {
-    existing = { id: Date.now(), name: brandName, cat, type: uType, status: uStatus };
+    const res = await api({action:'addBrand', name:brandName, cat, type:uType, status:uStatus});
+    existing = { id: res.id, name: brandName, cat, type: uType, status: uStatus };
     brands.push(existing);
   }
-  pendingFiles.forEach(f => {
+  for (const f of pendingFiles) {
     const isVid = !!f.name.match(/\.(mp4|mov|avi)$/i);
-    assets.push({ id: Date.now()+Math.random(), name: f.name, brand: existing.name, cat, type: uType, media: isVid ? '영상' : uMedia, date: today() });
-  });
+    const media = isVid ? '영상' : uMedia;
+    const d = today();
+    const res = await api({action:'addAsset', name:f.name, brand:existing.name, cat, type:uType, media, date:d});
+    assets.push({ id: res.id, name: f.name, brand: existing.name, cat, type: uType, media, date: d });
+  }
   const cnt = pendingFiles.length; pendingFiles = [];
-  renderPending(); renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
+  renderPending(); function showLoading(show) {
+  document.getElementById('loadingBar').style.display = show ? 'block' : 'none';
+}
+
+async function loadData() {
+  showLoading(true);
+  document.getElementById('brandGrid').innerHTML = '<div class="empty"><i class="ti ti-loader" style="font-size:26px;display:block;margin-bottom:7px"></i>데이터 불러오는 중...</div>';
+  try {
+    const [b, a] = await Promise.all([
+      api({action:'getBrands'}),
+      api({action:'getAssets'})
+    ]);
+    brands = Array.isArray(b) ? b : [];
+    assets = Array.isArray(a) ? a : [];
+  } catch(e) {
+    brands = []; assets = [];
+  }
+  renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
+  showLoading(false);
+}
+
+loadData();
   msg.textContent = `${existing.name}에 ${cnt}개 소재가 등록되었습니다.`;
   document.getElementById('u-brand-hint').textContent = '';
+  showLoading(false);
 }
 
 function closeM(id){document.getElementById(id).classList.remove('open');}
@@ -662,4 +683,3 @@ renderStats(); renderBrands(); renderGallery(); updateGalleryBrandSel();
 </script>
 </body>
 </html>
-
