@@ -451,8 +451,20 @@ const API_URL = 'https://script.google.com/a/macros/wisebirds.com/s/AKfycbyVdD2e
 
 async function api(params) {
   const url = API_URL + '?' + new URLSearchParams(params).toString();
-  const res = await fetch(url);
-  return res.json();
+  try {
+    // JSONP 방식으로 CORS 우회
+    return await new Promise((resolve, reject) => {
+      const cb = 'cb_' + Date.now();
+      const script = document.createElement('script');
+      window[cb] = (data) => { delete window[cb]; document.body.removeChild(script); resolve(data); };
+      script.onerror = () => { delete window[cb]; document.body.removeChild(script); reject(new Error('API 오류')); };
+      script.src = url + '&callback=' + cb;
+      document.body.appendChild(script);
+    });
+  } catch(e) {
+    console.error('API 오류:', e);
+    return null;
+  }
 }
 
 function showLoading(show) {
